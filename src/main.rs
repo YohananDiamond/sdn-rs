@@ -5,7 +5,7 @@ extern crate pest_derive;
 pub mod parser;
 
 fn main() {
-    let input = r#":hello"#;
+    let input = r#"("Hello, World!") (50 :kw10 20 30 40)"#;
     match parser::parse(input) {
         Ok(data) => {
             println!("Data:");

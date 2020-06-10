@@ -1,15 +1,17 @@
+use crate::pest;
 use crate::pest::{
-    error,
     iterators::{Pair, Pairs},
     Parser,
 };
+use std::collections::hash_map::{Entry, HashMap};
 use std::fmt;
 
 #[derive(Parser)]
 #[grammar = "sdn.pest"]
 struct SdnParser;
 
-pub type PestError<T> = error::Error<T>;
+pub type PestError<T> = pest::error::Error<T>;
+type KeywordMap = HashMap<String, Data>;
 
 pub fn parse(data: &str) -> Result<Vec<Data>, PestError<Rule>> {
     match SdnParser::parse(Rule::root, data) {
@@ -29,7 +31,10 @@ pub fn parse(data: &str) -> Result<Vec<Data>, PestError<Rule>> {
 
 #[derive(Clone)]
 pub enum Data {
-    List(Vec<Data>),
+    List {
+        args: Vec<Data>,
+        kwargs: HashMap<String, Data>,
+    },
     Int(i64),
     Float(f64),
     Str(String),
@@ -46,7 +51,13 @@ impl From<Pair<'_, Rule>> for Data {
                 let inner_str = inner.as_str();
                 match inner.clone().next().unwrap().as_rule() {
                     Rule::list => {
-                        Data::List(inner.next().unwrap().into_inner().map(Data::from).collect())
+                        let (vec, map) = Data::parse_list(
+                            inner.next().unwrap().into_inner().map(Data::from).collect(),
+                        ).unwrap(); // TODO: remove this unwrap
+                        Data::List {
+                            args: vec,
+                            kwargs: map,
+                        }
                     }
                     Rule::int => Data::Int(inner_str.parse().unwrap()),
                     Rule::float => Data::Float(inner_str.parse().unwrap()),
@@ -101,15 +112,62 @@ impl Data {
         final_string
     }
 
+    /**
+     * Returns Ok(content) if successful, or Err(error_str) if failed
+     */
+    fn parse_list(list: Vec<Data>) -> Result<(Vec<Data>, KeywordMap), String> {
+        let mut current_kw: Option<&str> = None;
+        let mut position: usize = 0;
+        let mut vec = Vec::new();
+        let mut map = HashMap::new();
+
+        while let Some(element) = list.get(position) {
+            if let Data::Keyword(keyword) = element {
+                if let Some(keyword_prev) = current_kw {
+                    return Err(format!(
+                        "keyword :{} without value in list",
+                        keyword_prev
+                    ));
+                }
+                current_kw = Some(keyword.as_str());
+            } else {
+                if let Some(keyword) = current_kw {
+                    match map.entry(keyword.to_string()) {
+                        Entry::Occupied(_) => {
+                            return Err(format!(
+                                "keyword :{} provided more than once in same list",
+                                keyword
+                            ))
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert(element.clone());
+                            current_kw = None;
+                        }
+                    }
+                } else {
+                    vec.push(element.clone());
+                }
+            }
+
+            position += 1;
+        }
+
+        match current_kw {
+            Some(kw) => Err(format!("keyword :{} without value in list", kw)),
+            None => Ok((vec, map)),
+        }
+    }
+
     pub fn repr(&self) -> String {
         match self {
             Data::Symbol(s) => s.clone(),
             Data::Str(s) => format!("{:?}", s),
             Data::Int(i) => format!("{}", i),
             Data::Float(f) => format!("{}", f),
-            Data::List(v) => format!(
-                "({})",
-                v.iter().map(Data::repr).collect::<Vec<String>>().join(" ")
+            Data::List { args, kwargs } => format!(
+                "({:?} {:?})",
+                args, // v.iter().map(Data::repr).collect::<Vec<String>>().join(" "),
+                kwargs,
             ),
             Data::Keyword(k) => format!(":{}", k),
             Data::Nil => "nil".into(),
