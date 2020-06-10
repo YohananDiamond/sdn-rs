@@ -11,21 +11,31 @@ use std::fmt;
 struct SdnParser;
 
 pub type PestError<T> = pest::error::Error<T>;
-type KeywordMap = HashMap<String, Data>;
+pub type KeywordMap = HashMap<String, Data>;
 
-pub fn parse(data: &str) -> Result<Vec<Data>, PestError<Rule>> {
+pub enum ParserResult {
+    Success(Vec<Data>),
+    PestError(PestError<Rule>),
+    StringError(String),
+}
+
+pub fn parse(data: &str) -> ParserResult {
     match SdnParser::parse(Rule::root, data) {
         Ok(mut parsed) => {
-            let mut data: Vec<Data> = parsed
-                .next()
-                .unwrap()
-                .into_inner()
-                .map(Data::from)
-                .collect();
+            let mut parsed_iter = parsed.next().unwrap().into_inner();
+            let mut data = Vec::<Data>::new();
+
+            for pair in parsed_iter {
+                match Data::parse_pair(pair) {
+                    Ok(o) => data.push(o),
+                    Err(e) => return ParserResult::StringError(e),
+                }
+            }
+
             data.pop(); // remove DataPre::Nil resulted from EOI
-            Ok(data)
+            ParserResult::Success(data)
         }
-        Err(e) => Err(e),
+        Err(e) => ParserResult::PestError(e),
     }
 }
 
@@ -43,36 +53,6 @@ pub enum Data {
     Nil,
 } // TODO: use &str instead of Strings
 
-impl From<Pair<'_, Rule>> for Data {
-    fn from(arg: Pair<Rule>) -> Data {
-        match arg.as_rule() {
-            Rule::expr => {
-                let mut inner = arg.into_inner();
-                let inner_str = inner.as_str();
-                match inner.clone().next().unwrap().as_rule() {
-                    Rule::list => {
-                        let (vec, map) = Data::parse_list(
-                            inner.next().unwrap().into_inner().map(Data::from).collect(),
-                        ).unwrap(); // TODO: remove this unwrap
-                        Data::List {
-                            args: vec,
-                            kwargs: map,
-                        }
-                    }
-                    Rule::int => Data::Int(inner_str.parse().unwrap()),
-                    Rule::float => Data::Float(inner_str.parse().unwrap()),
-                    Rule::string => Data::Str(Data::parse_string(inner)),
-                    Rule::symbol => Data::Symbol(inner_str.to_string()),
-                    Rule::keyword => Data::Keyword(inner_str.get(1..).unwrap_or("").to_string()),
-                    other => unreachable!("inside expr: {:?}", other), // TODO: maybe make a better check for this
-                }
-            }
-            Rule::EOI => Data::Nil,
-            other => unreachable!("{:?}", other), // TODO: maybe make a better check for this
-        }
-    }
-}
-
 impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.repr())
@@ -80,6 +60,49 @@ impl fmt::Debug for Data {
 }
 
 impl Data {
+    /// Parses a pair and converts it into data.
+    pub fn parse_pair(arg: Pair<'_, Rule>) -> Result<Data, String> {
+        match arg.as_rule() {
+            Rule::expr => {
+                let mut inner = arg.into_inner();
+                let inner_str = inner.as_str();
+                match inner.clone().next().unwrap().as_rule() {
+                    Rule::list => {
+                        let parse: Vec<Data> = inner
+                            .next()
+                            .unwrap()
+                            .into_inner()
+                            .map(Data::parse_pair)
+                            .collect::<Result<Vec<Data>, String>>()?;
+
+                        match Data::parse_list(parse) {
+                            Ok((vec, map)) => Ok(Data::List {
+                                args: vec,
+                                kwargs: map,
+                            }),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    Rule::int => Ok(Data::Int(inner_str.parse().unwrap())),
+                    Rule::float => Ok(Data::Float(inner_str.parse().unwrap())),
+                    Rule::string => Ok(Data::Str(Data::parse_string(inner))),
+                    Rule::symbol => Ok(Data::Symbol(inner_str.to_string())),
+                    Rule::keyword => {
+                        Ok(Data::Keyword(inner_str.get(1..).unwrap_or("").to_string()))
+                    }
+                    other => {
+                        return Err(format!(
+                            "supposedly unreachable rule inside expr: {:?}",
+                            other
+                        ))
+                    }
+                }
+            }
+            Rule::EOI => Ok(Data::Nil),
+            other => return Err(format!("supposedly unreachable rule: {:?}", other)),
+        }
+    }
+
     fn parse_string(string_data: Pairs<Rule>) -> String {
         let chars = string_data
             .clone() // string
@@ -112,9 +135,7 @@ impl Data {
         final_string
     }
 
-    /**
-     * Returns Ok(content) if successful, or Err(error_str) if failed
-     */
+    /// Returns Ok(content) if successful, or Err(error_str) if failed
     fn parse_list(list: Vec<Data>) -> Result<(Vec<Data>, KeywordMap), String> {
         let mut current_kw: Option<&str> = None;
         let mut position: usize = 0;
@@ -124,10 +145,7 @@ impl Data {
         while let Some(element) = list.get(position) {
             if let Data::Keyword(keyword) = element {
                 if let Some(keyword_prev) = current_kw {
-                    return Err(format!(
-                        "keyword :{} without value in list",
-                        keyword_prev
-                    ));
+                    return Err(format!("keyword :{} without value in list", keyword_prev));
                 }
                 current_kw = Some(keyword.as_str());
             } else {
@@ -165,9 +183,18 @@ impl Data {
             Data::Int(i) => format!("{}", i),
             Data::Float(f) => format!("{}", f),
             Data::List { args, kwargs } => format!(
-                "({:?} {:?})",
-                args, // v.iter().map(Data::repr).collect::<Vec<String>>().join(" "),
-                kwargs,
+                "({})",
+                vec![
+                    args.iter()
+                        .map(Data::repr)
+                        .collect::<Vec<String>>()
+                        .join(" "),
+                    kwargs
+                        .keys()
+                        .map(|key| format!(":{} {}", key, kwargs[key].repr()))
+                        .collect::<Vec<String>>()
+                        .join(" "),
+                ].iter().filter(|s| s.len() != 0).map(|s| s.as_str()).collect::<Vec<&str>>().join(" "),
             ),
             Data::Keyword(k) => format!(":{}", k),
             Data::Nil => "nil".into(),

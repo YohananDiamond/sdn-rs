@@ -4,15 +4,17 @@ extern crate pest_derive;
 
 pub mod parser;
 
+use parser::ParserResult;
+
 fn main() {
-    let input = r#"("Hello, World!") (50 :kw10 20 30 40)"#;
+    let input = r#"("Hello, World!") (:ab c)"#;
     match parser::parse(input) {
-        Ok(data) => {
-            println!("Data:");
+        ParserResult::Success(data) => {
             for x in data {
-                println!("* {:?}", x);
+                println!("{:?}", x);
             }
         }
-        Err(e) => println!("Parser error:\n{}", e),
+        ParserResult::PestError(e) => println!("Lexer error:\n{}", e),
+        ParserResult::StringError(e) => println!("Parser error: {}", e),
     }
 }
