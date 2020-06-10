@@ -22,18 +22,19 @@ pub enum ParserResult {
 pub fn parse(data: &str) -> ParserResult {
     match SdnParser::parse(Rule::root, data) {
         Ok(mut parsed) => {
-            let mut parsed_iter = parsed.next().unwrap().into_inner();
-            let mut data = Vec::<Data>::new();
-
-            for pair in parsed_iter {
-                match Data::parse_pair(pair) {
-                    Ok(o) => data.push(o),
-                    Err(e) => return ParserResult::StringError(e),
+            match parsed
+                .next()
+                .unwrap()
+                .into_inner()
+                .map(Data::parse_pair)
+                .collect::<Result<Vec<Data>, String>>()
+            {
+                Ok(mut o) => {
+                    o.pop(); // remove Data::Nil resulted from EOI
+                    ParserResult::Success(o)
                 }
+                Err(e) => ParserResult::StringError(e),
             }
-
-            data.pop(); // remove DataPre::Nil resulted from EOI
-            ParserResult::Success(data)
         }
         Err(e) => ParserResult::PestError(e),
     }
@@ -194,7 +195,12 @@ impl Data {
                         .map(|key| format!(":{} {}", key, kwargs[key].repr()))
                         .collect::<Vec<String>>()
                         .join(" "),
-                ].iter().filter(|s| s.len() != 0).map(|s| s.as_str()).collect::<Vec<&str>>().join(" "),
+                ]
+                .iter()
+                .filter(|s| s.len() != 0)
+                .map(|s| s.as_str())
+                .collect::<Vec<&str>>()
+                .join(" "),
             ),
             Data::Keyword(k) => format!(":{}", k),
             Data::Nil => "nil".into(),
