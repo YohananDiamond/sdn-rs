@@ -1,0 +1,20 @@
+// vim: ft=rust nofoldenable
+
+WHITESPACE = _{ " " }
+root = { SOI ~ (expr)+ ~ EOI }
+
+expr = { list | int | float | string | symbol | keyword }
+
+list = { "(" ~ (expr)* ~ ")" }
+int = @{ ("-")? ~ (ASCII_DIGIT)+ }
+float = @{ ("-")? ~ ((ASCII_DIGIT)* ~ "." ~ (ASCII_DIGIT)+ | (ASCII_DIGIT)+ ~ "." ~ (ASCII_DIGIT)*) }
+string = ${ "\"" ~ string_inner ~ "\"" }
+symbol = @{ (symbol_allowed) ~ (symbol_allowed | ASCII_DIGIT)* }
+keyword = @{ ":" ~ symbol }
+
+string_inner = { char* }
+char = { char_normal | char_escape_code }
+
+symbol_allowed = @{ !("\"" | "\\" | "'" | " " | "(" | ")" | ":") ~ ANY }
+char_normal = @{ !("\"" | "\\") ~ ANY }
+char_escape_code = @{ "\\" ~ ("\"" | "\\" | "n" | "t") }
