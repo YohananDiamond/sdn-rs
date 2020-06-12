@@ -8,3 +8,4 @@ pub mod export;
 
 pub use parser::{parse_string, ParserResult, PestError};
 pub use data::{Data, KeywordMap};
+pub use export::data_vec_for_file;

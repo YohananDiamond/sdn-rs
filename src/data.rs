@@ -11,7 +11,7 @@ pub enum Data<'a> {
     },
     Int(i64),
     Float(f64),
-    Str(String),
+    Str(String), // TODO: find a way to use &'a str here instead of String (maybe a Parser struct with a Vec of strings?)
     Symbol(&'a str),
     Keyword(&'a str),
     Nil,
