@@ -11,15 +11,15 @@ use std::fmt;
 struct SdnParser;
 
 pub type PestError<T> = pest::error::Error<T>;
-pub type KeywordMap = HashMap<String, Data>;
+pub type KeywordMap<'a> = HashMap<String, Data<'a>>;
 
-pub enum ParserResult {
-    Success(Vec<Data>),
+pub enum ParserResult<'a> {
+    Success(Vec<Data<'a>>),
     PestError(PestError<Rule>),
     StringError(String),
 }
 
-pub fn parse(data: &str) -> ParserResult {
+pub fn parse<'a>(data: &'a str) -> ParserResult<'a> {
     match SdnParser::parse(Rule::root, data) {
         Ok(mut parsed) => {
             match parsed
@@ -41,40 +41,34 @@ pub fn parse(data: &str) -> ParserResult {
 }
 
 #[derive(Clone)]
-pub enum Data {
+pub enum Data<'a> {
     List {
-        args: Vec<Data>,
-        kwargs: HashMap<String, Data>,
+        args: Vec<Data<'a>>,
+        kwargs: KeywordMap<'a>,
     },
     Int(i64),
     Float(f64),
     Str(String),
-    Symbol(String),
-    Keyword(String),
+    Symbol(&'a str),
+    Keyword(&'a str),
     Nil,
-} // TODO: use &str instead of Strings
-
-impl fmt::Debug for Data {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.repr())
-    }
 }
 
-impl Data {
+impl Data<'_> {
     /// Parses a pair and converts it into data.
-    pub fn parse_pair(arg: Pair<'_, Rule>) -> Result<Data, String> {
+    pub fn parse_pair<'a>(arg: Pair<'a, Rule>) -> Result<Data<'a>, String> {
         match arg.as_rule() {
             Rule::expr => {
                 let mut inner = arg.into_inner();
                 let inner_str = inner.as_str();
                 match inner.clone().next().unwrap().as_rule() {
                     Rule::list => {
-                        let parse: Vec<Data> = inner
+                        let parse: Vec<Data<'a>> = inner
                             .next()
                             .unwrap()
                             .into_inner()
                             .map(Data::parse_pair)
-                            .collect::<Result<Vec<Data>, String>>()?;
+                            .collect::<Result<Vec<Data<'a>>, String>>()?;
 
                         match Data::parse_list(parse) {
                             Ok((vec, map)) => Ok(Data::List {
@@ -87,10 +81,8 @@ impl Data {
                     Rule::int => Ok(Data::Int(inner_str.parse().unwrap())),
                     Rule::float => Ok(Data::Float(inner_str.parse().unwrap())),
                     Rule::string => Ok(Data::Str(Data::parse_string(inner))),
-                    Rule::symbol => Ok(Data::Symbol(inner_str.to_string())),
-                    Rule::keyword => {
-                        Ok(Data::Keyword(inner_str.get(1..).unwrap_or("").to_string()))
-                    }
+                    Rule::symbol => Ok(Data::Symbol(inner_str)),
+                    Rule::keyword => Ok(Data::Keyword(inner_str.get(1..).unwrap_or(""))),
                     other => {
                         return Err(format!(
                             "supposedly unreachable rule inside expr: {:?}",
@@ -137,7 +129,7 @@ impl Data {
     }
 
     /// Returns Ok(content) if successful, or Err(error_str) if failed
-    fn parse_list(list: Vec<Data>) -> Result<(Vec<Data>, KeywordMap), String> {
+    fn parse_list<'a>(list: Vec<Data<'a>>) -> Result<(Vec<Data<'a>>, KeywordMap<'a>), String> {
         let mut current_kw: Option<&str> = None;
         let mut position: usize = 0;
         let mut vec = Vec::new();
@@ -148,7 +140,7 @@ impl Data {
                 if let Some(keyword_prev) = current_kw {
                     return Err(format!("keyword :{} without value in list", keyword_prev));
                 }
-                current_kw = Some(keyword.as_str());
+                current_kw = Some(keyword);
             } else {
                 if let Some(keyword) = current_kw {
                     match map.entry(keyword.to_string()) {
@@ -179,7 +171,7 @@ impl Data {
 
     pub fn repr(&self) -> String {
         match self {
-            Data::Symbol(s) => s.clone(),
+            Data::Symbol(s) => s.to_string(),
             Data::Str(s) => format!("{:?}", s),
             Data::Int(i) => format!("{}", i),
             Data::Float(f) => format!("{}", f),
@@ -205,5 +197,11 @@ impl Data {
             Data::Keyword(k) => format!(":{}", k),
             Data::Nil => "nil".into(),
         }
+    }
+}
+
+impl<'a> fmt::Debug for Data<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.repr())
     }
 }
