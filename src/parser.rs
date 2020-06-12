@@ -1,8 +1,6 @@
 use crate::pest;
-use crate::pest::{
-    iterators::{Pair, Pairs},
-    Parser,
-};
+use crate::pest::iterators::{Pair, Pairs};
+use crate::pest::Parser;
 use std::collections::hash_map::{Entry, HashMap};
 use std::fmt;
 
@@ -12,12 +10,6 @@ struct SdnParser;
 
 pub type PestError<T> = pest::error::Error<T>;
 pub type KeywordMap<'a> = HashMap<String, Data<'a>>;
-
-pub enum ParserResult<'a> {
-    Success(Vec<Data<'a>>),
-    PestError(PestError<Rule>),
-    StringError(String),
-}
 
 pub fn parse<'a>(data: &'a str) -> ParserResult<'a> {
     match SdnParser::parse(Rule::root, data) {
@@ -40,7 +32,14 @@ pub fn parse<'a>(data: &'a str) -> ParserResult<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, PartialEq)]
+pub enum ParserResult<'a> {
+    Success(Vec<Data<'a>>),
+    PestError(PestError<Rule>),
+    StringError(String),
+}
+
+#[derive(Clone, PartialEq)]
 pub enum Data<'a> {
     List {
         args: Vec<Data<'a>>,
@@ -203,5 +202,34 @@ impl Data<'_> {
 impl<'a> fmt::Debug for Data<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.repr())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use Data::*;
+
+    #[test]
+    fn simple() {
+        assert_eq!(
+            parse("10 20 foo"),
+            ParserResult::Success(vec![Int(10), Int(20), Symbol("foo")])
+        );
+    }
+
+    #[test]
+    fn keyword_list() {
+        let mut map = HashMap::new();
+        map.insert("hello".to_string(), Int(30));
+        map.insert("asd".to_string(), Int(40));
+
+        assert_eq!(
+            parse("(10 20 :hello 30 :asd 40 nope)"),
+            ParserResult::Success(vec![List {
+                args: vec![Int(10), Int(20), Symbol("nope")],
+                kwargs: map,
+            }])
+        );
     }
 }
